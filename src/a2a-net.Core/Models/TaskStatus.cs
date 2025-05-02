@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using System.Globalization;
+
 namespace A2A.Models;
 
 /// <summary>
@@ -36,7 +38,24 @@ public record TaskStatus
     /// <summary>
     /// Gets/sets the task's timestamp
     /// </summary>
-    [DataMember(Name = "timestamp", Order = 3), JsonPropertyName("timestamp"), JsonPropertyOrder(3), YamlMember(Alias = "timestamp", Order = 3)]
+    [DataMember(Name = "timestamp", Order = 3), JsonPropertyName("timestamp"), JsonPropertyOrder(3), YamlMember(Alias = "timestamp", Order = 3), JsonConverter(typeof(DateTimeOffsetJsonConverter))]
     public virtual DateTimeOffset Timestamp { get; set; }
 
+}
+
+public class DateTimeOffsetJsonConverter : JsonConverter<DateTimeOffset>
+{
+    public override DateTimeOffset Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType is JsonTokenType.Number)
+        {
+            return DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64());
+        }
+
+        return DateTimeOffset.Parse(reader.GetString()!, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+    }
+    public override void Write(Utf8JsonWriter writer, DateTimeOffset value, JsonSerializerOptions options)
+    {
+        writer.WriteNumberValue(value.ToUnixTimeMilliseconds());
+    }
 }
