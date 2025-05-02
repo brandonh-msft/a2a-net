@@ -141,6 +141,11 @@ while (true)
             {
                 AnsiConsole.MarkupLineInterpolated($"[red]Unknown event type: {response.Result?.GetType().Name}[/]");
             }
+
+            if (configuration["DOTNET_ENVIRONMENT"] is string s && s.Equals("Development", StringComparison.OrdinalIgnoreCase))
+            {
+                await System.Threading.Tasks.Task.Delay(50, cancellationSource.Token);
+            }
         }
 
         Console.WriteLine();
