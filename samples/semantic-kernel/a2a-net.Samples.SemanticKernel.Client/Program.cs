@@ -131,7 +131,7 @@ while (true)
             }
             else if (response.Result is TaskStatusUpdateEvent evt)
             {
-                AnsiConsole.MarkupInterpolated($"[grey19]{evt.Status.Message?.ToText() ?? string.Empty}[/]");
+                AnsiConsole.MarkupInterpolated($"[grey23]{evt.Status.Message?.ToText() ?? string.Empty}[/]");
                 if (evt.Final is true)
                 {
                     Console.WriteLine();
