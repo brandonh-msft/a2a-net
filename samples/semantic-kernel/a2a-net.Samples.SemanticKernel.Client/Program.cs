@@ -14,6 +14,8 @@
 using A2A.Events;
 using A2A.Samples.SemanticKernel.Client;
 
+using Microsoft.VisualStudio.Threading;
+
 using System.Text;
 
 var configuration = new ConfigurationBuilder()
@@ -64,22 +66,19 @@ while (true)
     try
     {
         CancellationTokenSource cts = new();
-        AnsiConsole.Status()
+        var spinner = AnsiConsole.Status()
             .Spinner(Spinner.Known.SquareCorners)
             .SpinnerStyle(Style.Parse("green"))
-            .StartAsync("Communicating with Agent... ", ctx => System.Threading.Tasks.Task.Delay(Timeout.Infinite, cts.Token));
+            .StartAsync("Communicating with Agent...", ctx => System.Threading.Tasks.Task.Delay(Timeout.Infinite, cts.Token));
 
-        bool first = true;
-        await foreach (var response in client.SendTaskStreamingAsync(request, cancellationSource.Token))
+        if (applicationOptions.Streaming is true)
         {
-            if (response.Error is not null)
             var parts = new List<Part>() { new TextPart(prompt) };
             if (!string.IsNullOrWhiteSpace(filePath))
             {
                 parts.Add(new FilePart { File = new() { Bytes = Convert.ToBase64String(fileBytes!), Name = filename } });
             }
 
-            cts.Cancel();
             var request = new SendTaskStreamingRequest
             {
                 Params = new()
@@ -93,78 +92,114 @@ while (true)
                 }
             };
 
-            if (response.Result is TaskArtifactUpdateEvent artifact)
+            bool first = true, firstArtifact = true;
+            await foreach (var response in client.SendTaskStreamingAsync(request, cancellationSource.Token))
             {
+                if (response.Error is not null)
+                {
+                    AnsiConsole.MarkupLineInterpolated($"[red]❌ Error: {response.Error.Message}[/]");
+                    continue;
+                }
+
                 if (first)
                 {
+                    await cancelSpinner(cts, spinner);
                     first = false;
-                    AnsiConsole.Markup($"[bold green]Agent>[/] ");
                 }
 
-                if (artifact.Artifact.Append is false)
+                if (response.Result is TaskArtifactUpdateEvent artifactEvent)
                 {
-                    Console.WriteLine();
-                }
+                    await cancelSpinner(cts, spinner);
 
-                foreach (var p in artifact.Artifact.Parts ?? [])
-                {
-                    if (p is TextPart t)
+                    if (firstArtifact)
                     {
-                        AnsiConsole.Markup(p.ToText()?.EscapeMarkup() ?? string.Empty);
+                        firstArtifact = false;
+                        AnsiConsole.Markup($"[bold green]Agent>[/] ");
                     }
-                    else if (p is FilePart f)
+
+                    if (artifactEvent.Artifact.Append is false)
                     {
-                        AnsiConsole.MarkupLineInterpolated($"[green]File: {f.File.Name}[/]");
-                        if (f.File.Uri is not null)
-                        {
-                            AnsiConsole.MarkupLineInterpolated($"[green]URI: {f.File.Uri}[/]");
-                        }
-                        else if (f.File.Bytes is not null)
-                        {
-                            var filename = System.IO.Path.GetTempFileName();
-                            await System.IO.File.WriteAllBytesAsync(filename, Convert.FromBase64String(f.File.Bytes!));
-                            AnsiConsole.MarkupLineInterpolated($"[green]Downloaded to: {filename}[/]");
-                        }
+                        Console.WriteLine();
                     }
-                    else if (p is DataPart d)
+
+                    await printArtifactAsync(artifactEvent.Artifact);
+
+                    if (artifactEvent.Artifact.LastChunk is true)
                     {
-                        AnsiConsole.MarkupLineInterpolated($"[green]Data: {(d.Type is null ? "Unknown" : d.Type)}[/]");
-                        foreach (var i in d.Metadata ?? [])
-                        {
-                            AnsiConsole.MarkupLineInterpolated($"[green]{i.Key}: {i.Value}[/]");
-                        }
-                    }
-                    else
-                    {
-                        AnsiConsole.MarkupLineInterpolated($"[red]Unknown part type: {p.Type}[/]");
+                        Console.WriteLine();
                     }
                 }
-
-                if (artifact.Artifact.LastChunk is true)
+                else if (response.Result is TaskStatusUpdateEvent evt)
                 {
-                    Console.WriteLine();
+                    var msg = evt.Status.Message?.ToText() ?? string.Empty;
+
+                    if (msg.Contains("ToolCalls:InProgress") is true && cts.IsCancellationRequested)
+                    {
+                        cts = new CancellationTokenSource();
+                        spinner = AnsiConsole.Status()
+                            .Spinner(Spinner.Known.SquareCorners)
+                            .SpinnerStyle(Style.Parse("grey58"))
+                            .StartAsync("[grey23]Running tool...[/]", ctx => System.Threading.Tasks.Task.Delay(Timeout.Infinite, cts.Token));
+                        continue;
+                    }
+                    else if (msg.Contains("ToolsCalls:Completed") is true && !cts.IsCancellationRequested)
+                    {
+                        await cancelSpinner(cts, spinner);
+                    }
+                    else if (!cts.IsCancellationRequested)
+                    {
+                        continue;
+                    }
+
+                    AnsiConsole.MarkupInterpolated($"[grey23]{msg}[/]");
+                    if (evt.Final is true)
+                    {
+                        Console.WriteLine();
+                    }
+                }
+                else
+                {
+                    AnsiConsole.MarkupLineInterpolated($"[red]Unknown event type: {response.Result?.GetType().Name}[/]");
                 }
             }
-            else if (response.Result is TaskStatusUpdateEvent evt)
+
+            Console.WriteLine();
+        }
+        else
+        {
+            var request = new SendTaskRequest
             {
-                AnsiConsole.MarkupInterpolated($"[grey23]{evt.Status.Message?.ToText() ?? string.Empty}[/]");
-                if (evt.Final is true)
+                Params = new()
                 {
-                    Console.WriteLine();
+                    SessionId = session,
+                    Message = new()
+                    {
+                        Role = MessageRole.User,
+                        Parts = [new TextPart(prompt)]
+                    }
+                }
+            };
+
+            var task = await client.SendTaskAsync(request);
+            if (task.Error is not null)
+            {
+                AnsiConsole.MarkupLineInterpolated($"[red]❌ Error: {task.Error.Message}[/]");
+                continue;
+            }
+
+            if (task.Result?.Artifacts?.Count is not null and not 0)
+            {
+                AnsiConsole.Markup($"[bold green]Agent>[/] ");
+                foreach (var a in task.Result?.Artifacts ?? [])
+                {
+                    await printArtifactAsync(a);
                 }
             }
             else
             {
-                AnsiConsole.MarkupLineInterpolated($"[red]Unknown event type: {response.Result?.GetType().Name}[/]");
-            }
-
-            if (configuration["DOTNET_ENVIRONMENT"] is string s && s.Equals("Development", StringComparison.OrdinalIgnoreCase))
-            {
-                await System.Threading.Tasks.Task.Delay(50, cancellationSource.Token);
+                AnsiConsole.MarkupLineInterpolated($"[red]❌ Error: No artifacts found in response.[/]");
             }
         }
-
-        Console.WriteLine();
     }
     catch (OperationCanceledException)
     {
@@ -173,5 +208,55 @@ while (true)
     catch (Exception ex)
     {
         AnsiConsole.MarkupLineInterpolated($"[red]❌ Error: {ex.Message}[/]");
+    }
+}
+
+static async System.Threading.Tasks.Task printArtifactAsync(Artifact artifact)
+{
+    foreach (var p in artifact.Parts ?? [])
+    {
+        if (p is TextPart t)
+        {
+            AnsiConsole.Markup(p.ToText()?.EscapeMarkup() ?? string.Empty);
+        }
+        else if (p is FilePart f)
+        {
+            AnsiConsole.MarkupLineInterpolated($"[darkgreen]File: {f.File.Name}[/]");
+            if (f.File.Uri is not null)
+            {
+                AnsiConsole.MarkupLineInterpolated($"[darkgreen]URI: {f.File.Uri}[/]");
+            }
+            else if (f.File.Bytes is not null)
+            {
+                var filename = Path.Combine(Path.GetTempPath(), f.File.Name!);
+                await System.IO.File.WriteAllBytesAsync(filename, Convert.FromBase64String(f.File.Bytes!));
+                AnsiConsole.MarkupLineInterpolated($"[darkgreen]Downloaded to: {filename}[/]");
+            }
+        }
+        else if (p is DataPart d)
+        {
+            AnsiConsole.MarkupLineInterpolated($"[darkgreen]Data: {(d.Type is null ? "Unknown" : d.Type)}[/]");
+            foreach (var i in d.Metadata ?? [])
+            {
+                AnsiConsole.MarkupLineInterpolated($"[darkgreen]{i.Key}: {i.Value}[/]");
+            }
+        }
+        else
+        {
+            AnsiConsole.MarkupLineInterpolated($"[red]Unknown part type: {p.Type}[/]");
+        }
+    }
+}
+
+static async System.Threading.Tasks.Task cancelSpinner(CancellationTokenSource cts, System.Threading.Tasks.Task spinner)
+{
+    cts.Cancel();
+    try
+    {
+        await spinner;
+    }
+    catch (Exception e) when (e is TaskCanceledException or OperationCanceledException)
+    {
+        // Ignore cancellation exceptions
     }
 }
