@@ -24,11 +24,23 @@ var configuration = new ConfigurationBuilder()
     .Build();
 var applicationOptions = new ApplicationOptions();
 configuration.Bind(applicationOptions);
-var services = new ServiceCollection();
-services.AddA2AProtocolHttpClient(options =>
+
+// Allow `--streaming` to be a flag or a value
+if (applicationOptions.Streaming is false)
 {
-    options.Endpoint = applicationOptions.Server;
-});
+    var streamingArg = args.Select((v, i) => (i, v)).FirstOrDefault(i => i.v.Contains("streaming", StringComparison.OrdinalIgnoreCase));
+    if (streamingArg != default)
+    {
+        applicationOptions.Streaming = streamingArg.i + 1 >= args.Length || bool.Parse(args[streamingArg.i + 1]);
+    }
+}
+
+ArgumentNullException.ThrowIfNull(applicationOptions.Server);
+
+var services = new ServiceCollection();
+services.ConfigureHttpClientDefaults(b => b.ConfigureHttpClient(c => c.Timeout = TimeSpan.FromDays(1)));
+services.AddA2AProtocolHttpClient(options => options.Endpoint = applicationOptions.Server);
+
 var provider = services.BuildServiceProvider();
 var client = provider.GetRequiredService<IA2AProtocolClient>();
 var cancellationSource = new CancellationTokenSource();

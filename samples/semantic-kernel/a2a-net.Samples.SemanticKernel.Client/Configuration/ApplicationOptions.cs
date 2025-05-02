@@ -23,6 +23,7 @@ public class ApplicationOptions
     /// Gets/sets the URI of the A2A server to interact with
     /// </summary>
     [Required]
-    public Uri Server { get; set; } = null!;
+    public Uri? Server { get; set; } = null;
 
+    public bool Streaming { get; set; }
 }
