@@ -71,40 +71,39 @@ while (true)
             .SpinnerStyle(Style.Parse("green"))
             .StartAsync("Communicating with Agent...", ctx => System.Threading.Tasks.Task.Delay(Timeout.Infinite, cts.Token));
 
+        var parts = new List<Part>() { new TextPart(prompt) };
+        if (!string.IsNullOrWhiteSpace(filePath))
+        {
+            parts.Add(new FilePart { File = new() { Bytes = Convert.ToBase64String(fileBytes!), Name = filename } });
+        }
+
+        var taskParams = new TaskSendParameters
+        {
+            SessionId = session,
+            Message = new()
+            {
+                Role = MessageRole.User,
+                Parts = [.. parts]
+            }
+        };
+
         if (applicationOptions.Streaming is true)
         {
-            var parts = new List<Part>() { new TextPart(prompt) };
-            if (!string.IsNullOrWhiteSpace(filePath))
-            {
-                parts.Add(new FilePart { File = new() { Bytes = Convert.ToBase64String(fileBytes!), Name = filename } });
-            }
-
-            var request = new SendTaskStreamingRequest
-            {
-                Params = new()
-                {
-                    SessionId = session,
-                    Message = new()
-                    {
-                        Role = MessageRole.User,
-                        Parts = new(parts)
-                    }
-                }
-            };
+            var request = new SendTaskStreamingRequest { Params = taskParams };
 
             bool first = true, firstArtifact = true;
             await foreach (var response in client.SendTaskStreamingAsync(request, cancellationSource.Token))
             {
-                if (response.Error is not null)
-                {
-                    AnsiConsole.MarkupLineInterpolated($"[red]❌ Error: {response.Error.Message}[/]");
-                    continue;
-                }
-
                 if (first)
                 {
                     await cancelSpinner(cts, spinner);
                     first = false;
+                }
+
+                if (response.Error is not null)
+                {
+                    AnsiConsole.MarkupLineInterpolated($"[red]❌ Error: {response.Error.Message}[/]");
+                    continue;
                 }
 
                 if (response.Result is TaskArtifactUpdateEvent artifactEvent)
@@ -167,18 +166,7 @@ while (true)
         }
         else
         {
-            var request = new SendTaskRequest
-            {
-                Params = new()
-                {
-                    SessionId = session,
-                    Message = new()
-                    {
-                        Role = MessageRole.User,
-                        Parts = [new TextPart(prompt)]
-                    }
-                }
-            };
+            var request = new SendTaskRequest { Params = taskParams };
 
             var task = await client.SendTaskAsync(request);
             if (task.Error is not null)
