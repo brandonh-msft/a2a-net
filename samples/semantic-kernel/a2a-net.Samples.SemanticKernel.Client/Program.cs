@@ -50,6 +50,28 @@ AnsiConsole.Write(new FigletText("A2A Protocol Chat").Color(Color.Blue));
 AnsiConsole.MarkupLine("[gray]Type your prompts below. Press [bold]Ctrl+C[/] to exit.[/]\n");
 var responseSoFar = new StringBuilder();
 var session = Guid.NewGuid().ToString("N");
+
+CancellationTokenSource spinnerCanceller = new();
+System.Threading.Tasks.Task spinner;
+void cancelSpinner()
+{
+    spinnerCanceller.Cancel();
+    try
+    {
+        spinner.Wait(spinnerCanceller.Token);
+    }
+    catch (Exception e) when (e is TaskCanceledException or OperationCanceledException)
+    {
+        // Ignore cancellation exceptions
+    }
+}
+
+void spinStopThen(Action runThis)
+{
+    spinnerCanceller.Cancel();
+    runThis();
+}
+
 while (true)
 {
     var prompt = AnsiConsole.Ask<string>("[bold blue]User>[/]");
@@ -65,11 +87,10 @@ while (true)
 
     try
     {
-        CancellationTokenSource cts = new();
-        var spinner = AnsiConsole.Status()
+        spinner = AnsiConsole.Status()
             .Spinner(Spinner.Known.SquareCorners)
             .SpinnerStyle(Style.Parse("green"))
-            .StartAsync("Communicating with Agent...", ctx => System.Threading.Tasks.Task.Delay(Timeout.Infinite, cts.Token));
+            .StartAsync("Communicating with Agent...", ctx => System.Threading.Tasks.Task.Delay(Timeout.Infinite, spinnerCanceller.Token));
 
         var parts = new List<Part>() { new TextPart(prompt) };
         if (!string.IsNullOrWhiteSpace(filePath))
@@ -92,77 +113,83 @@ while (true)
             var request = new SendTaskStreamingRequest { Params = taskParams };
 
             bool first = true, firstArtifact = true;
-            await foreach (var response in client.SendTaskStreamingAsync(request, cancellationSource.Token))
+            try
             {
-                if (first)
+                await foreach (var response in client.SendTaskStreamingAsync(request, cancellationSource.Token))
                 {
-                    await cancelSpinner(cts, spinner);
-                    first = false;
-                }
-
-                if (response.Error is not null)
-                {
-                    AnsiConsole.MarkupLineInterpolated($"[red]❌ Error: {response.Error.Message}[/]");
-                    continue;
-                }
-
-                if (response.Result is TaskArtifactUpdateEvent artifactEvent)
-                {
-                    await cancelSpinner(cts, spinner);
-
-                    if (firstArtifact)
+                    if (first)
                     {
-                        firstArtifact = false;
-                        AnsiConsole.Markup($"[bold green]Agent>[/] ");
+                        cancelSpinner();
+                        first = false;
                     }
 
-                    if (artifactEvent.Artifact.Append is false)
+                    if (response.Error is not null)
                     {
-                        Console.WriteLine();
-                    }
-
-                    await printArtifactAsync(artifactEvent.Artifact);
-
-                    if (artifactEvent.Artifact.LastChunk is true)
-                    {
-                        Console.WriteLine();
-                    }
-                }
-                else if (response.Result is TaskStatusUpdateEvent evt)
-                {
-                    var msg = evt.Status.Message?.ToText() ?? string.Empty;
-
-                    if (msg.Contains("ToolCalls:InProgress") is true && cts.IsCancellationRequested)
-                    {
-                        cts = new CancellationTokenSource();
-                        spinner = AnsiConsole.Status()
-                            .Spinner(Spinner.Known.SquareCorners)
-                            .SpinnerStyle(Style.Parse("grey58"))
-                            .StartAsync("[grey23]Running tool...[/]", ctx => System.Threading.Tasks.Task.Delay(Timeout.Infinite, cts.Token));
-                        continue;
-                    }
-                    else if (msg.Contains("ToolsCalls:Completed") is true && !cts.IsCancellationRequested)
-                    {
-                        await cancelSpinner(cts, spinner);
-                    }
-                    else if (!cts.IsCancellationRequested)
-                    {
+                        spinStopThen(() => AnsiConsole.MarkupLineInterpolated($"[red]❌ Error: {response.Error.Message}[/]"));
                         continue;
                     }
 
-                    AnsiConsole.MarkupInterpolated($"[grey23]{msg}[/]");
-                    if (evt.Final is true)
+                    if (response.Result is TaskArtifactUpdateEvent artifactEvent)
                     {
-                        Console.WriteLine();
+                        cancelSpinner();
+
+                        if (firstArtifact)
+                        {
+                            firstArtifact = false;
+                            AnsiConsole.Markup($"[bold green]Agent>[/] ");
+                        }
+
+                        if (artifactEvent.Artifact.Append is false)
+                        {
+                            Console.WriteLine();
+                        }
+
+                        await printArtifactAsync(artifactEvent.Artifact);
+
+                        if (artifactEvent.Artifact.LastChunk is true)
+                        {
+                            Console.WriteLine();
+                        }
                     }
-                }
-                else
-                {
-                    AnsiConsole.MarkupLineInterpolated($"[red]Unknown event type: {response.Result?.GetType().Name}[/]");
+                    else if (response.Result is TaskStatusUpdateEvent evt)
+                    {
+                        var msg = evt.Status.Message?.ToText() ?? string.Empty;
+
+                        if (msg.Contains("ToolCalls:InProgress") is true && spinnerCanceller.IsCancellationRequested)
+                        {
+                            spinnerCanceller = new CancellationTokenSource();
+                            spinner = AnsiConsole.Status()
+                                .Spinner(Spinner.Known.SquareCorners)
+                                .SpinnerStyle(Style.Parse("grey58"))
+                                .StartAsync("[grey23]Running tool...[/]", ctx => System.Threading.Tasks.Task.Delay(Timeout.Infinite, spinnerCanceller.Token));
+
+                            continue;
+                        }
+                        else if (msg.Contains("ToolsCalls:Completed") is true && !spinnerCanceller.IsCancellationRequested)
+                        {
+                            cancelSpinner();
+                        }
+                        else if (!spinnerCanceller.IsCancellationRequested)
+                        {
+                            continue;
+                        }
+
+                        AnsiConsole.MarkupInterpolated($"[grey23]{msg}[/]");
+                        if (evt.Final is true)
+                        {
+                            Console.WriteLine();
+                        }
+                    }
+                    else
+                    {
+                        spinStopThen(() => AnsiConsole.MarkupLineInterpolated($"[red]Unknown event type: {response.Result?.GetType().Name}[/]"));
+                    }
                 }
             }
-
-            Console.WriteLine();
+            finally
+            {
+                spinStopThen(() => Console.WriteLine());
+            }
         }
         else
         {
@@ -185,7 +212,7 @@ while (true)
             }
             else
             {
-                AnsiConsole.MarkupLineInterpolated($"[red]❌ Error: No artifacts found in response.[/]");
+                AnsiConsole.MarkupLine($"[red]❌ Error: No artifacts found in response.[/]");
             }
         }
     }
@@ -233,18 +260,5 @@ static async System.Threading.Tasks.Task printArtifactAsync(Artifact artifact)
         {
             AnsiConsole.MarkupLineInterpolated($"[red]Unknown part type: {p.Type}[/]");
         }
-    }
-}
-
-static async System.Threading.Tasks.Task cancelSpinner(CancellationTokenSource cts, System.Threading.Tasks.Task spinner)
-{
-    cts.Cancel();
-    try
-    {
-        await spinner;
-    }
-    catch (Exception e) when (e is TaskCanceledException or OperationCanceledException)
-    {
-        // Ignore cancellation exceptions
     }
 }

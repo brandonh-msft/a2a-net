@@ -65,7 +65,7 @@ public class A2AProtocolHttpClient(IOptions<A2AProtocolClientOptions> options, H
             {
                 e = JsonSerializer.Deserialize<RpcResponse<TaskEvent>>(json)!;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 continue;
             }
