@@ -47,21 +47,7 @@ public class A2AProtocolHttpClient(IOptions<A2AProtocolClientOptions> options, H
     public virtual async IAsyncEnumerable<RpcResponse<TaskEvent>> SendTaskStreamingAsync(SendTaskStreamingRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        HttpContent? content = null;
-        if (request.Params.Message.Parts?.OfType<FilePart>().Any() is true)
-        {
-            content = new MultipartContent()
-            //content = new MultipartFormDataContent("--- a2a-request ---")
-            {
-                { new StringContent(JsonSerializer.Serialize(request)) }
-            };
-
-        }
-        else
-        {
-            content = new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, MediaTypeNames.Application.Json);
-        }
-
+        HttpContent? content = new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, MediaTypeNames.Application.Json);
         ArgumentNullException.ThrowIfNull(content);
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, Options.Endpoint) { Content = content };
         httpRequest.EnableWebAssemblyStreamingResponse();
