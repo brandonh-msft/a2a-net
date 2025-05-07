@@ -33,7 +33,14 @@ public static class HttpClientExtensions
         try
         {
             var path = ".well-known/agent.json";
-            var endpoint = request.Address == null ? new Uri($"/{path}", UriKind.Relative) : new Uri(request.Address, path);
+            var builder = new UriBuilder(request.Address?.ToString() ?? $"/{path}");
+            if (request.Address is not null)
+            {
+                builder.Query = request.Address.Query;
+                builder.Path = builder.Path.TrimEnd('/') + $"/{path}";
+            }
+
+            var endpoint = builder.Uri;
             var agentCard = await httpClient.GetFromJsonAsync<AgentCard>(endpoint, cancellationToken).ConfigureAwait(false);
             return new()
             {
@@ -41,7 +48,7 @@ public static class HttpClientExtensions
                 Agents = agentCard == null ? [] : [agentCard]
             };
         }
-        catch (HttpRequestException ex) when(ex.StatusCode == HttpStatusCode.NotFound)
+        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
         {
             var path = ".well-known/agents.json";
             var endpoint = request.Address == null ? new Uri($"/{path}", UriKind.Relative) : new Uri(request.Address, path);
