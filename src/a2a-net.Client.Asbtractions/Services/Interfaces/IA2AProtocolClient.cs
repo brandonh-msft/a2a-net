@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
 namespace A2A.Client.Services;
 
 /// <summary>
@@ -19,7 +20,5 @@ namespace A2A.Client.Services;
 public interface IA2AProtocolClient
     : IA2AProtocolService, IDisposable
 {
-
-
-
+    Task<IEnumerable<AgentCard>> GetAgentCardsAsync(CancellationToken cancellationToken = default);
 }

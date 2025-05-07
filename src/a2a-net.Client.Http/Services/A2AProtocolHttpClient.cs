@@ -35,6 +35,13 @@ public class A2AProtocolHttpClient(IOptions<A2AProtocolClientOptions> options, H
     protected HttpClient HttpClient { get; } = httpClient;
 
     /// <inheritdoc/>
+    public virtual async Task<IEnumerable<AgentCard>> GetAgentCardsAsync(CancellationToken cancellationToken = default)
+    {
+        var doc = await HttpClient.GetA2ADiscoveryDocumentAsync(this.Options.Endpoint, cancellationToken).ConfigureAwait(false);
+        return doc.Agents;
+    }
+
+    /// <inheritdoc/>
     public virtual async Task<RpcResponse<Models.Task>> SendTaskAsync(SendTaskRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);

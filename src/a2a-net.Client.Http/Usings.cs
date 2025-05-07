@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+global using A2A.Client;
 global using A2A.Client.Configuration;
 global using A2A.Client.Services;
 global using A2A.Events;

@@ -81,6 +81,12 @@ while (true)
         continue;
     }
 
+    if (prompt is "/agent" or "/agents")
+    {
+        await printAgentCardsAsync();
+        continue;
+    }
+
     var filePath = AnsiConsole.Ask<string>("[blue]File path (optional, <enter> to skip)>[/]", string.Empty).TrimStart('"').TrimEnd('"');
     string? filename = !string.IsNullOrWhiteSpace(filePath) ? Path.GetFileName(filePath) : null;
     var fileBytes = !string.IsNullOrWhiteSpace(filePath) ? System.IO.File.ReadAllBytes(filePath) : null;

@@ -1,11 +1,13 @@
 {
   "profiles": {
-    "a2a-net.Samples.SemanticKernel.Client": {
+    "streaming": {
       "commandName": "Project",
-      "commandLineArgs": "--server http://localhost:5079/a2a"
-      "environmentVariables": {
-        "DOTNET_ENVIRONMENT": "Development"
-      }
+      //"commandLineArgs": "--server http://localhost:5222/a2a/v1.0/subscriptions/c6311630-ca87-4f08-be8f-100203cec93c/resourceGroups/hurlburb-bearmetal/providers/Microsoft.MachineLearningServices/workspaces/msft-bearmetal/asst_S1hlBphLA8Ujrme58aTIcFwh/agent --streaming",
+      "commandLineArgs": "--server http://localhost:5222/a2a/v1.0/subscriptions/c6311630-ca87-4f08-be8f-100203cec93c/resourceGroups/hurlburb-bearmetal/providers/Microsoft.MachineLearningServices/workspaces/msft-bearmetal/asst_ivzuXx0C19x3qey0U5Sn5HBO/agent --streaming"
+    },
+    "async": {
+      "commandName": "Project",
+      "commandLineArgs": "--server http://localhost:5222/a2a/v1.0/subscriptions/c6311630-ca87-4f08-be8f-100203cec93c/resourceGroups/hurlburb-bearmetal/providers/Microsoft.MachineLearningServices/workspaces/msft-bearmetal/asst_S1hlBphLA8Ujrme58aTIcFwh/agent"
     }
   }
 }

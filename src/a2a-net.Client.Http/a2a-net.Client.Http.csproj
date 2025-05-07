@@ -39,6 +39,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\a2a-net.Client.Asbtractions\a2a-net.Client.Abstractions.csproj" />
+    <ProjectReference Include="..\a2a-net.Client\a2a-net.Client.csproj" />
   </ItemGroup>
 
 </Project>
