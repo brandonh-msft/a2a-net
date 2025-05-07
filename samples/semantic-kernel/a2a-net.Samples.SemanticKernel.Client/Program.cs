@@ -16,6 +16,9 @@ using A2A.Samples.SemanticKernel.Client;
 
 using Microsoft.VisualStudio.Threading;
 
+using Spectre.Console.Extensions;
+
+using System.Diagnostics;
 using System.Text;
 
 var configuration = new ConfigurationBuilder()
@@ -45,20 +48,21 @@ services.AddA2AProtocolHttpClient(options => options.Endpoint = applicationOptio
 
 var provider = services.BuildServiceProvider();
 var client = provider.GetRequiredService<IA2AProtocolClient>();
-var cancellationSource = new CancellationTokenSource();
+
+var agentCts = new CancellationTokenSource();
 AnsiConsole.Write(new FigletText("A2A Protocol Chat").Color(Color.Blue));
 AnsiConsole.MarkupLine("[gray]Type your prompts below. Press [bold]Ctrl+C[/] to exit.[/]\n");
 var responseSoFar = new StringBuilder();
 var session = Guid.NewGuid().ToString("N");
 
-CancellationTokenSource spinnerCanceller = new();
-System.Threading.Tasks.Task spinner;
+CancellationTokenSource spinnerCts = new();
+System.Threading.Tasks.Task spinner = System.Threading.Tasks.Task.CompletedTask;
 void cancelSpinner()
 {
-    spinnerCanceller.Cancel();
+    spinnerCts.Cancel();
     try
     {
-        spinner.Wait(spinnerCanceller.Token);
+        spinner.Wait(spinnerCts.Token);
     }
     catch (Exception e) when (e is TaskCanceledException or OperationCanceledException)
     {
@@ -68,12 +72,13 @@ void cancelSpinner()
 
 void spinStopThen(Action runThis)
 {
-    spinnerCanceller.Cancel();
+    cancelSpinner();
     runThis();
 }
 
 while (true)
 {
+    cancelSpinner();
     var prompt = AnsiConsole.Ask<string>("[bold blue]User>[/]");
     if (string.IsNullOrWhiteSpace(prompt))
     {
@@ -91,13 +96,10 @@ while (true)
     string? filename = !string.IsNullOrWhiteSpace(filePath) ? Path.GetFileName(filePath) : null;
     var fileBytes = !string.IsNullOrWhiteSpace(filePath) ? System.IO.File.ReadAllBytes(filePath) : null;
 
+    spinnerCts = new();
+
     try
     {
-        spinner = AnsiConsole.Status()
-            .Spinner(Spinner.Known.SquareCorners)
-            .SpinnerStyle(Style.Parse("green"))
-            .StartAsync("Communicating with Agent...", ctx => System.Threading.Tasks.Task.Delay(Timeout.Infinite, spinnerCanceller.Token));
-
         var parts = new List<Part>() { new TextPart(prompt) };
         if (!string.IsNullOrWhiteSpace(filePath))
         {
@@ -116,19 +118,18 @@ while (true)
 
         if (applicationOptions.Streaming is true)
         {
+            spinner = AnsiConsole.Status()
+                .Spinner(Spinner.Known.SquareCorners)
+                .SpinnerStyle(Style.Parse("green"))
+                .StartAsync("Communicating with Agent...", ctx => System.Threading.Tasks.Task.Run(() => { while (true) ctx.Refresh(); }, spinnerCts.Token).WaitAsync(spinnerCts.Token));
+
             var request = new SendTaskStreamingRequest { Params = taskParams };
 
-            bool first = true, firstArtifact = true;
+            bool firstArtifact = true;
             try
             {
-                await foreach (var response in client.SendTaskStreamingAsync(request, cancellationSource.Token))
+                await foreach (var response in client.SendTaskStreamingAsync(request, agentCts.Token))
                 {
-                    if (first)
-                    {
-                        cancelSpinner();
-                        first = false;
-                    }
-
                     if (response.Error is not null)
                     {
                         spinStopThen(() => AnsiConsole.MarkupLineInterpolated($"[red]❌ Error: {response.Error.Message}[/]"));
@@ -137,12 +138,11 @@ while (true)
 
                     if (response.Result is TaskArtifactUpdateEvent artifactEvent)
                     {
-                        cancelSpinner();
-
                         if (firstArtifact)
                         {
-                            firstArtifact = false;
+                            cancelSpinner();
                             AnsiConsole.Markup($"[bold green]Agent>[/] ");
+                            firstArtifact = false;
                         }
 
                         if (artifactEvent.Artifact.Append is false)
@@ -161,29 +161,29 @@ while (true)
                     {
                         var msg = evt.Status.Message?.ToText() ?? string.Empty;
 
-                        if (msg.Contains("ToolCalls:InProgress") is true && spinnerCanceller.IsCancellationRequested)
+                        if (msg.Contains("ToolCalls:InProgress") is true && spinnerCts.IsCancellationRequested)
                         {
-                            spinnerCanceller = new CancellationTokenSource();
+                            cancelSpinner();
+                            spinnerCts = new CancellationTokenSource();
                             spinner = AnsiConsole.Status()
                                 .Spinner(Spinner.Known.SquareCorners)
                                 .SpinnerStyle(Style.Parse("grey58"))
-                                .StartAsync("[grey23]Running tool...[/]", ctx => System.Threading.Tasks.Task.Delay(Timeout.Infinite, spinnerCanceller.Token));
+                                .StartAsync("[grey23]Running tool...[/]", ctx => System.Threading.Tasks.Task.Delay(Timeout.Infinite, spinnerCts.Token));
 
                             continue;
                         }
-                        else if (msg.Contains("ToolsCalls:Completed") is true && !spinnerCanceller.IsCancellationRequested)
+                        else if (msg.Contains("ToolsCalls:Completed") is true && !spinnerCts.IsCancellationRequested)
                         {
                             cancelSpinner();
                         }
-                        else if (!spinnerCanceller.IsCancellationRequested)
+                        else if (!string.IsNullOrWhiteSpace(msg))
                         {
-                            continue;
+                            spinStopThen(() => AnsiConsole.MarkupLineInterpolated($"[grey23]{msg}[/]"));
                         }
 
-                        AnsiConsole.MarkupInterpolated($"[grey23]{msg}[/]");
                         if (evt.Final is true)
                         {
-                            Console.WriteLine();
+                            spinStopThen(() => Console.WriteLine());
                         }
                     }
                     else
@@ -201,24 +201,35 @@ while (true)
         {
             var request = new SendTaskRequest { Params = taskParams };
 
-            var task = await client.SendTaskAsync(request);
-            if (task.Error is not null)
+            try
             {
-                AnsiConsole.MarkupLineInterpolated($"[red]❌ Error: {task.Error.Message}[/]");
-                continue;
-            }
+                var task = await AnsiConsole.Status()
+                    .Spinner(Spinner.Known.SquareCorners)
+                    .SpinnerStyle(Style.Parse("green"))
+                    .StartAsync("Communicating with Agent...", async ctx => await client.SendTaskAsync(request, agentCts.Token));
 
-            if (task.Result?.Artifacts?.Count is not null and not 0)
-            {
-                AnsiConsole.Markup($"[bold green]Agent>[/] ");
-                foreach (var a in task.Result?.Artifacts ?? [])
+                if (task.Error is not null)
                 {
-                    await printArtifactAsync(a);
+                    AnsiConsole.MarkupLineInterpolated($"[red]❌ Error: {task.Error.Message}[/]");
+                    continue;
+                }
+
+                if (task.Result?.Artifacts?.Count is not null and not 0)
+                {
+                    AnsiConsole.Markup($"[bold green]Agent>[/] ");
+                    foreach (var a in task.Result?.Artifacts ?? [])
+                    {
+                        await printArtifactAsync(a);
+                    }
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine($"[red]❌ Error: No artifacts found in response.[/]");
                 }
             }
-            else
+            finally
             {
-                AnsiConsole.MarkupLine($"[red]❌ Error: No artifacts found in response.[/]");
+                spinStopThen(() => Console.WriteLine());
             }
         }
     }
@@ -228,7 +239,30 @@ while (true)
     }
     catch (Exception ex)
     {
-        AnsiConsole.MarkupLineInterpolated($"[red]❌ Error: {ex.Message}[/]");
+        spinStopThen(() => AnsiConsole.MarkupLineInterpolated($"[red]❌ Error: {ex.Message}[/]"));
+    }
+}
+
+async System.Threading.Tasks.Task printAgentCardsAsync()
+{
+    var agents = await client.GetAgentCardsAsync();
+    if (agents?.Any() is not true)
+    {
+        AnsiConsole.MarkupLine("[red]❌ No agents found.[/]");
+        return;
+    }
+    else
+    {
+        AnsiConsole.MarkupLine("[bold green]Available Agents:[/]");
+        foreach (var agent in agents)
+        {
+            AnsiConsole.MarkupLineInterpolated($"[green]{agent.Name} - {agent.Description} - v{(string.IsNullOrWhiteSpace(agent.Version) ? "??" : agent.Version)}[/]");
+            AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.Url)} - {agent.Url}[/]");
+            AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.Authentication)} - {(agent.Authentication is null ? "None" : string.Join(", ", agent.Authentication!.Schemes))}[/]");
+            AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.Capabilities)} - {nameof(agent.Capabilities.Streaming)}: {(agent.Capabilities.Streaming ? "✅" : "❌")} | {nameof(agent.Capabilities.PushNotifications)}: {(agent.Capabilities.PushNotifications ? "✅" : "❌")} | {nameof(agent.Capabilities.StateTransitionHistory)}: {(agent.Capabilities.StateTransitionHistory ? "✅" : "❌")}[/]");
+            AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.DocumentationUrl)} - {agent.DocumentationUrl}[/]");
+            AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.Skills)} - {(agent.Skills.Count is 0 ? "None" : string.Join(", ", agent.Skills.Select(s => s.Name)))}[/]");
+        }
     }
 }
 
