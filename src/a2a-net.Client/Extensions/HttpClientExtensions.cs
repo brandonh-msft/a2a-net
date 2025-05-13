@@ -11,6 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+
 namespace A2A.Client;
 
 /// <summary>
@@ -18,6 +21,28 @@ namespace A2A.Client;
 /// </summary>
 public static class HttpClientExtensions
 {
+    public static async IAsyncEnumerable<A2ADiscoveryDocument> GetA2ARegistryResponseAsync(this HttpClient httpClient, A2ADiscoveryDocumentRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var b = new UriBuilder(request.Address!);
+        var registryUri = b.Uri;
+
+        using var response = await httpClient.GetAsync(registryUri, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+
+        var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var reader = new StreamReader(contentStream);
+        var json = await reader.ReadToEndAsync().ConfigureAwait(false);
+
+        var documents = JsonSerializer.Deserialize<IEnumerable<A2ADiscoveryDocument>>(json);
+
+        if (documents != null)
+        {
+            foreach (var document in documents)
+            {
+                yield return document;
+            }
+        }
+    }
 
     /// <summary>
     /// Retrieves the A2A discovery document from a remote agent
@@ -30,35 +55,22 @@ public static class HttpClientExtensions
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(request);
-        try
-        {
-            var path = ".well-known/agent.json";
-            var builder = new UriBuilder(request.Address?.ToString() ?? $"/{path}");
-            if (request.Address is not null)
-            {
-                builder.Query = request.Address.Query;
-                builder.Path = builder.Path.TrimEnd('/') + $"/{path}";
-            }
 
-            var endpoint = builder.Uri;
-            var agentCard = await httpClient.GetFromJsonAsync<AgentCard>(endpoint, cancellationToken).ConfigureAwait(false);
-            return new()
-            {
-                Endpoint = endpoint.IsAbsoluteUri ? endpoint : new(httpClient.BaseAddress!, path),
-                Agents = agentCard == null ? [] : [agentCard]
-            };
-        }
-        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        var path = ".well-known/agent.json";
+        var builder = new UriBuilder(request.Address?.ToString() ?? $"/{path}");
+        if (request.Address is not null)
         {
-            var path = ".well-known/agents.json";
-            var endpoint = request.Address == null ? new Uri($"/{path}", UriKind.Relative) : new Uri(request.Address, path);
-            var agentCards = await httpClient.GetFromJsonAsync<List<AgentCard>>(endpoint, cancellationToken).ConfigureAwait(false);
-            return new()
-            {
-                Endpoint = endpoint.IsAbsoluteUri ? endpoint : new(httpClient.BaseAddress!, path),
-                Agents = agentCards ?? []
-            };
+            builder.Query = request.Address.Query;
+            builder.Path = builder.Path.TrimEnd('/') + $"/{path}";
         }
+
+        var endpoint = builder.Uri;
+        var agentCard = await httpClient.GetFromJsonAsync<AgentCard>(endpoint, cancellationToken).ConfigureAwait(false);
+        return new()
+        {
+            Endpoint = endpoint.IsAbsoluteUri ? endpoint : new(httpClient.BaseAddress!, path),
+            Agents = agentCard is null ? [] : [agentCard]
+        };
     }
 
     /// <summary>

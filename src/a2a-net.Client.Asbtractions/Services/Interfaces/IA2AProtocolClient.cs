@@ -20,5 +20,6 @@ namespace A2A.Client.Services;
 public interface IA2AProtocolClient
     : IA2AProtocolService, IDisposable
 {
-    Task<IEnumerable<AgentCard>> GetAgentCardsAsync(CancellationToken cancellationToken = default);
+    Task<AgentCard> GetAgentCardAsync(CancellationToken cancellationToken = default);
+    IAsyncEnumerable<AgentCard> GetRegistryAgentsAsync(CancellationToken cancellationToken = default);
 }

@@ -91,10 +91,19 @@ while (true)
         continue;
     }
 
-    if (prompt is "/agent" or "/agents")
+    if (prompt is "/agent")
     {
-        await printAgentCardsAsync();
+        await printAgentCardAsync();
         continue;
+    }
+    else if (prompt is "/registry" or "/agents")
+    {
+        await printRegistryAsync(agentCts.Token);
+        continue;
+    }
+    else if (prompt is "/exit" or ['/', 'q', ..] or ['/', 'x', ..])
+    {
+        break;
     }
 
     var filePath = AnsiConsole.Ask<string>("[blue]File path (optional, <enter> to skip)>[/]", string.Empty).TrimStart('"').TrimEnd('"');
@@ -248,10 +257,36 @@ while (true)
     }
 }
 
-async System.Threading.Tasks.Task printAgentCardsAsync()
+async System.Threading.Tasks.Task printRegistryAsync(CancellationToken cancellationToken)
 {
-    var agents = await client.GetAgentCardsAsync();
-    if (agents?.Any() is not true)
+    bool hasAgents = false;
+    await foreach (var agent in client.GetRegistryAgentsAsync(cancellationToken))
+    {
+        if (!hasAgents)
+        {
+            AnsiConsole.MarkupLine("[bold green]Available Agents:[/]");
+            hasAgents = true;
+        }
+
+        AnsiConsole.MarkupLineInterpolated($"[green]{agent.Name} - {agent.Description} - v{(string.IsNullOrWhiteSpace(agent.Version) ? "??" : agent.Version)}[/]");
+        AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.Url)} - {agent.Url}[/]");
+        AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.Authentication)} - {(agent.Authentication is null ? "None" : string.Join(", ", agent.Authentication!.Schemes))}[/]");
+        AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.Capabilities)} - {nameof(agent.Capabilities.Streaming)}: {(agent.Capabilities.Streaming ? "✅" : "❌")} | {nameof(agent.Capabilities.PushNotifications)}: {(agent.Capabilities.PushNotifications ? "✅" : "❌")} | {nameof(agent.Capabilities.StateTransitionHistory)}: {(agent.Capabilities.StateTransitionHistory ? "✅" : "❌")}[/]");
+        AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.DocumentationUrl)} - {agent.DocumentationUrl}[/]");
+        AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.Skills)} - {(agent.Skills.Count is 0 ? "None" : string.Join(", ", agent.Skills.Select(s => s.Name)))}[/]");
+    }
+
+    if (!hasAgents)
+    {
+        AnsiConsole.MarkupLine("[red]❌ No agents found.[/]");
+        return;
+    }
+}
+
+async System.Threading.Tasks.Task printAgentCardAsync()
+{
+    var agent = await client.GetAgentCardAsync();
+    if (agent is null)
     {
         AnsiConsole.MarkupLine("[red]❌ No agents found.[/]");
         return;
@@ -259,15 +294,12 @@ async System.Threading.Tasks.Task printAgentCardsAsync()
     else
     {
         AnsiConsole.MarkupLine("[bold green]Available Agents:[/]");
-        foreach (var agent in agents)
-        {
-            AnsiConsole.MarkupLineInterpolated($"[green]{agent.Name} - {agent.Description} - v{(string.IsNullOrWhiteSpace(agent.Version) ? "??" : agent.Version)}[/]");
-            AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.Url)} - {agent.Url}[/]");
-            AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.Authentication)} - {(agent.Authentication is null ? "None" : string.Join(", ", agent.Authentication!.Schemes))}[/]");
-            AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.Capabilities)} - {nameof(agent.Capabilities.Streaming)}: {(agent.Capabilities.Streaming ? "✅" : "❌")} | {nameof(agent.Capabilities.PushNotifications)}: {(agent.Capabilities.PushNotifications ? "✅" : "❌")} | {nameof(agent.Capabilities.StateTransitionHistory)}: {(agent.Capabilities.StateTransitionHistory ? "✅" : "❌")}[/]");
-            AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.DocumentationUrl)} - {agent.DocumentationUrl}[/]");
-            AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.Skills)} - {(agent.Skills.Count is 0 ? "None" : string.Join(", ", agent.Skills.Select(s => s.Name)))}[/]");
-        }
+        AnsiConsole.MarkupLineInterpolated($"[green]{agent.Name} - {agent.Description} - v{(string.IsNullOrWhiteSpace(agent.Version) ? "??" : agent.Version)}[/]");
+        AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.Url)} - {agent.Url}[/]");
+        AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.Authentication)} - {(agent.Authentication is null ? "None" : string.Join(", ", agent.Authentication!.Schemes))}[/]");
+        AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.Capabilities)} - {nameof(agent.Capabilities.Streaming)}: {(agent.Capabilities.Streaming ? "✅" : "❌")} | {nameof(agent.Capabilities.PushNotifications)}: {(agent.Capabilities.PushNotifications ? "✅" : "❌")} | {nameof(agent.Capabilities.StateTransitionHistory)}: {(agent.Capabilities.StateTransitionHistory ? "✅" : "❌")}[/]");
+        AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.DocumentationUrl)} - {agent.DocumentationUrl}[/]");
+        AnsiConsole.MarkupLineInterpolated($"[green]  {nameof(agent.Skills)} - {(agent.Skills.Count is 0 ? "None" : string.Join(", ", agent.Skills.Select(s => s.Name)))}[/]");
     }
 }
 

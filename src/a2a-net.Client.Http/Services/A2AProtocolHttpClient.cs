@@ -46,10 +46,25 @@ public class A2AProtocolHttpClient : IA2AProtocolClient, IDisposable
     protected HttpClient HttpClient { get; }
 
     /// <inheritdoc/>
-    public virtual async Task<IEnumerable<AgentCard>> GetAgentCardsAsync(CancellationToken cancellationToken = default)
+    public virtual async Task<AgentCard> GetAgentCardAsync(CancellationToken cancellationToken = default)
     {
         var doc = await HttpClient.GetA2ADiscoveryDocumentAsync(this.Options.Endpoint, cancellationToken).ConfigureAwait(false);
-        return doc.Agents;
+        return doc.Agents.First();
+    }
+
+    public async IAsyncEnumerable<AgentCard> GetRegistryAgentsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        // {http://localhost:5222/a2a/v1.0/subscriptions/c6311630-ca87-4f08-be8f-100203cec93c/resourceGroups/hurlburb-bearmetal/providers/Microsoft.MachineLearningServices/workspaces/msft-bearmetal/asst_ivzuXx0C19x3qey0U5Sn5HBO/agent}
+        var registryEndpoint = new UriBuilder(this.Options.Endpoint);
+        registryEndpoint.Path = $"{registryEndpoint.Path.TrimEnd('/')}/../../agents";
+
+        await foreach (var i in this.HttpClient.GetFromJsonAsAsyncEnumerable<AgentCard>(registryEndpoint.Uri, cancellationToken: cancellationToken))
+        {
+            if (i is not null)
+            {
+                yield return i;
+            }
+        }
     }
 
     /// <inheritdoc/>
@@ -174,5 +189,4 @@ public class A2AProtocolHttpClient : IA2AProtocolClient, IDisposable
         Dispose(disposing: true);
         GC.SuppressFinalize(this);
     }
-
 }
