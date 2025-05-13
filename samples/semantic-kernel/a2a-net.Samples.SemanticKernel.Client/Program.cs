@@ -14,11 +14,9 @@
 using A2A.Events;
 using A2A.Samples.SemanticKernel.Client;
 
-using Microsoft.VisualStudio.Threading;
+using Azure.Core;
+using Azure.Identity;
 
-using Spectre.Console.Extensions;
-
-using System.Diagnostics;
 using System.Text;
 
 var configuration = new ConfigurationBuilder()
@@ -42,9 +40,16 @@ if (applicationOptions.Streaming is false)
 
 ArgumentNullException.ThrowIfNull(applicationOptions.Server);
 
+var cred = new DefaultAzureCredential();
+var token = await cred.GetTokenAsync(new TokenRequestContext(["https://management.azure.com/.default"]), default);
+
 var services = new ServiceCollection();
 services.ConfigureHttpClientDefaults(b => b.ConfigureHttpClient(c => c.Timeout = TimeSpan.FromDays(1)));
-services.AddA2AProtocolHttpClient(options => options.Endpoint = applicationOptions.Server);
+services.AddA2AProtocolHttpClient(options =>
+{
+    options.Endpoint = applicationOptions.Server;
+    options.Authorization = () => ("Bearer", token.Token);
+});
 
 var provider = services.BuildServiceProvider();
 var client = provider.GetRequiredService<IA2AProtocolClient>();

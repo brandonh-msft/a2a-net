@@ -28,5 +28,4 @@ public class A2ADiscoveryDocument
     /// Gets a list contained the discovered <see cref="AgentCard"/> entries returned by the remote agent
     /// </summary>
     public virtual required IReadOnlyList<AgentCard> Agents { get; init; }
-
 }
