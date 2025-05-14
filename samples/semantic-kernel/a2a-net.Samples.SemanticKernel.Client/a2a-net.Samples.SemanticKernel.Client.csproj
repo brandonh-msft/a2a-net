@@ -16,6 +16,8 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="9.0.4" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.4" />
     <PackageReference Include="Spectre.Console" Version="0.50.0" />
+    <PackageReference Include="Spectre.Console.ImageSharp" Version="0.50.0" />
+    <PackageReference Include="Spectre.Console.Json" Version="0.50.0" />
   </ItemGroup>
 
   <ItemGroup>
